@@ -30,10 +30,7 @@ nlp = spacy.load('en_core_web_lg') # Load spacy model to process the document
 def read_articles_from_file_list(folder_name):
     """
     Read articles from files matching patterns <file_pattern> from  
-    the directory <folder_name>. 
-    The content of the article is saved in the dictionary whose key
-    is the id of the article (extracted from the file name).
-    Each element of <sentence_list> is one line of the article.
+    the directory <folder_name>.
     """
     file_list = os.listdir(folder_name)
 
@@ -52,8 +49,8 @@ def read_predictions_from_file(filename):
     """
     Reader for the gold file and the template output file. 
     Return values are four arrays with article ids, labels 
-    (or ? in the case of a template file), begin of a fragment, 
-    end of a fragment. 
+    (or ? in the case of a template file), and the beginning
+    and ending of fragments.
     """
     articles_id, span_starts, span_ends, gold_labels = ([], [], [], [])
     with open(filename, "r") as f:
@@ -65,7 +62,13 @@ def read_predictions_from_file(filename):
             span_ends.append(span_end)
     return articles_id, span_starts, span_ends, gold_labels
 
+
 def valence(file):
+    """
+    Short function to read the VAD Lexicon values in
+    and create them in dictionary form for retrieval
+    during feature extraction.
+    """
     vad = {}
     with open(file) as f:
         for line in f.readlines():
@@ -75,6 +78,9 @@ def valence(file):
     
 
 def compute_features(articles, articles_id, span_starts, span_ends):
+    """
+    Feature extraction!
+    """
     textfeatures = []
 
     file_c = 0
@@ -104,7 +110,7 @@ def compute_features(articles, articles_id, span_starts, span_ends):
                 arousal_fragment = {}
                 dominance_fragment = {}
 
-                #print(prop.text)
+                # Extracting the sentiment features for each token
                 for token in prop:
                     if token.text in vad:
                         valencecount += 1
@@ -113,14 +119,12 @@ def compute_features(articles, articles_id, span_starts, span_ends):
                         dominance_fragment[token.text] = vad[token.text]['dominance']
 
                 intensity = valencecount/len(prop)
-                # blob = TextBlob(doc.text)
-                #
-                # polarity = blob.sentiment[0]
-                # subjectivity = blob.sentiment[1]
 
+                # The fragment's document vector
                 vector = prop.vector
                 vector = str(vector).replace('\n', '')
 
+                # Named Entities
                 ents = list(prop.ents)
 
                 features = {
@@ -133,10 +137,8 @@ def compute_features(articles, articles_id, span_starts, span_ends):
                     'valence' : str(valence_fragment),
                     'arousal' : str(arousal_fragment),
                     'dominance' : str(dominance_fragment)
-                    #'polarity' : polarity,
-                    #'subjectivity' : subjectivity
                 }
-                #print(features)
+
                 textfeatures.append(features)
 
     return textfeatures
@@ -145,24 +147,12 @@ with open(propaganda_techniques_file, "r") as f:
     propaganda_techniques_names = [ line.rstrip() for line in f.readlines() ]
 
 ### MAIN ###
-
 # loading articles' content from *.txt files in the train folder
 articles = read_articles_from_file_list(train_folder)
 
 # loading gold labels, articles ids and sentence ids from files *.task-TC.labels in the train labels folder 
 ref_articles_id, ref_span_starts, ref_span_ends, train_gold_labels = read_predictions_from_file(train_labels_file)
 print("Loaded %d annotations from %d articles" % (len(ref_span_starts), len(set(ref_articles_id))))
-
-## UNCOMMENT ME to print propaganda fragments along with their gold labels for feature development
-# with open(test_output_file, "w") as f:
-#     for technique in propaganda_techniques_names:
-#         f.write("\n***%s***\n\n" % (technique.upper()))
-#         for id, start, end, label in zip(ref_articles_id, ref_span_starts, ref_span_ends, train_gold_labels):
-#             if label == technique:
-#                 text = articles[id][int(start):int(end)]
-#                 f.write("%s\n" % (text))
-
-
 
 # Using preprocessing to encode string features
 vec = DictVectorizer(sparse=False)
@@ -178,29 +168,29 @@ clf = LogisticRegression(penalty='l2',
 
 clf.fit(train, train_gold_labels)
 
-# reading data from the development set
+## Reading data from the development set
 dev_articles = read_articles_from_file_list(dev_folder)
 test_articles = read_articles_from_file_list(test_folder)
 dev_article_ids, dev_span_starts, dev_span_ends, dev_labels = read_predictions_from_file(dev_labels_file)
 test_article_ids, test_span_starts, test_span_ends, test_labels = read_predictions_from_file(test_template_labels_file)
 
-# computing the predictions on the development set and test set
-
+## Computing the predictions on the development set and test set
 dev = vec.transform(compute_features(dev_articles, dev_article_ids, dev_span_starts, dev_span_ends))
 test = vec.transform(compute_features(test_articles, test_article_ids, test_span_starts, test_span_ends))
 
-## Change me between "test" and "dev" to test on a different set
+## Change the argument given to the .predict() method to either "test" and "dev"
 predictions = clf.predict(dev)
 dev_labels = np.asarray(dev_labels)
 
 labels = list(clf.classes_)
 
-# writing predictions to file
+## Writing predictions to file
 with open(task_TC_output_file, "w") as fout:
     for article_id, prediction, span_start, span_end in zip(dev_article_ids, predictions, dev_span_starts, dev_span_ends):
         fout.write("%s\t%s\t%s\t%s\n" % (article_id, prediction, span_start, span_end))
 print("Predictions written to file " + task_TC_output_file)
 
+## Creating and printing confusion matrices, both normalized and not
 def plot_confusion_matrix(cm, title='Confusion matrix', cmap=plt.cm.Blues):
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
